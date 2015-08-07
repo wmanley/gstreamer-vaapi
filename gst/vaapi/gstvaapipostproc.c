@@ -1032,96 +1032,17 @@ gst_vaapipostproc_transform_caps_impl (GstBaseTransform * trans,
     GstPadDirection direction, GstCaps * caps)
 {
   GstVaapiPostproc *const postproc = GST_VAAPIPOSTPROC (trans);
-  GstVideoInfo vi;
-  GstVideoFormat out_format;
-  GstCaps *out_caps;
-  GstVaapiCapsFeature feature;
-  const gchar *feature_str;
-  guint width, height;
 
   /* Generate the sink pad caps, that could be fixated afterwards */
   if (direction == GST_PAD_SRC) {
     if (!ensure_allowed_sinkpad_caps (postproc))
       return NULL;
     return gst_caps_ref (postproc->allowed_sinkpad_caps);
-  }
-
-  /* Generate complete set of src pad caps if non-fixated sink pad
-     caps are provided */
-  if (!gst_caps_is_fixed (caps)) {
+  } else {
     if (!ensure_allowed_srcpad_caps (postproc))
       return NULL;
     return gst_caps_ref (postproc->allowed_srcpad_caps);
   }
-
-  /* Generate the expected src pad caps, from the current fixated
-     sink pad caps */
-  if (!gst_video_info_from_caps (&vi, caps))
-    return NULL;
-
-  // Set double framerate in interlaced mode
-  if (is_deinterlace_enabled (postproc, &vi)) {
-    gint fps_n = GST_VIDEO_INFO_FPS_N (&vi);
-    gint fps_d = GST_VIDEO_INFO_FPS_D (&vi);
-    if (!gst_util_fraction_multiply (fps_n, fps_d, 2, 1, &fps_n, &fps_d))
-      return NULL;
-    GST_VIDEO_INFO_FPS_N (&vi) = fps_n;
-    GST_VIDEO_INFO_FPS_D (&vi) = fps_d;
-  }
-  // Signal the other pad that we only generate progressive frames
-  GST_VIDEO_INFO_INTERLACE_MODE (&vi) = GST_VIDEO_INTERLACE_MODE_PROGRESSIVE;
-
-  // Update size from user-specified parameters
-  find_best_size (postproc, &vi, &width, &height);
-
-  // Update format from user-specified parameters
-  /* XXX: this is a workaround until auto-plugging is fixed when
-   * format=ENCODED + memory:VASurface caps feature are provided.
-   * use the downstream negotiated video format as the output format
-   * if the user didn't explicitly ask for colorspace conversion.
-   * Use a filter caps which contain all raw video formats, (excluding
-   * GST_VIDEO_FORMAT_ENCODED) */
-  if (postproc->format != DEFAULT_FORMAT)
-    out_format = postproc->format;
-  else {
-    GstCaps *peer_caps;
-    GstVideoInfo peer_vi;
-    peer_caps =
-        gst_pad_peer_query_caps (GST_BASE_TRANSFORM_SRC_PAD (trans),
-        postproc->allowed_srcpad_caps);
-    if (gst_caps_is_empty (peer_caps))
-      return peer_caps;
-    if (!gst_caps_is_fixed (peer_caps))
-      peer_caps = gst_caps_fixate (peer_caps);
-    gst_video_info_from_caps (&peer_vi, peer_caps);
-    out_format = GST_VIDEO_INFO_FORMAT (&peer_vi);
-    if (peer_caps)
-      gst_caps_unref (peer_caps);
-  }
-
-  feature =
-      gst_vaapi_find_preferred_caps_feature (GST_BASE_TRANSFORM_SRC_PAD (trans),
-      out_format, &out_format);
-  gst_video_info_change_format (&vi, out_format, width, height);
-
-  out_caps = gst_video_info_to_caps (&vi);
-  if (!out_caps)
-    return NULL;
-
-  if (feature) {
-    feature_str = gst_vaapi_caps_feature_to_string (feature);
-    if (feature_str)
-      gst_caps_set_features (out_caps, 0,
-          gst_caps_features_new (feature_str, NULL));
-  }
-
-  /* we don't need to do format conversion if GL_TEXTURE_UPLOAD_META
-   * is negotiated */
-  if (feature != GST_VAAPI_CAPS_FEATURE_GL_TEXTURE_UPLOAD_META &&
-      postproc->format != out_format) {
-    postproc->format = out_format;
-  }
-  return out_caps;
 }
 
 static GstCaps *
